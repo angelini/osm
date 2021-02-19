@@ -1,11 +1,12 @@
 mod action;
 mod base;
 mod generator;
+mod operation;
 mod path;
 mod reader;
 mod state;
 mod store;
-mod transformer;
+mod tree;
 mod validator;
 mod writer;
 
@@ -15,10 +16,10 @@ use arrow::datatypes::{DataType, Field, Schema};
 
 use action::{Action, ActionError};
 use base::{Bucket, Partition, Protocol};
-use crate::path::DatasetPath;
+use operation::{MovePartition, Operation};
+use path::DatasetPath;
 use state::{State, StateError};
 use store::{FileStore, Store, StoreError};
-use transformer::{MovePartitionTransformer, Transformer};
 
 #[derive(Debug)]
 enum RuntimeError {
@@ -104,7 +105,7 @@ fn main() -> Result<()> {
     let target = path.partition_path(&Partition::new("v", "10"));
 
     let move_partition =
-        MovePartitionTransformer::new(
+        MovePartition::new(
             source,
             target,
         );

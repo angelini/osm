@@ -109,3 +109,12 @@ impl fmt::Display for Bucket {
         write!(f, "{}://{}", self.protocol, self.name)
     }
 }
+
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+pub struct Output(String);
+
+impl fmt::Display for Output {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}

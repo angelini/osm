@@ -1,7 +1,10 @@
 use std::fmt;
 
+use im::HashMap;
+
+use crate::base::{ObjectKey};
 use crate::path::{ObjectPath, PartitionPath};
-use crate::state::{State, StateError};
+use crate::state::{ObjectState, State, StateError};
 use crate::store::{Store, StoreError};
 
 #[derive(Debug)]
@@ -32,8 +35,8 @@ pub struct ActionEffects {
 }
 
 impl ActionEffects {
-    fn new() -> ActionEffects {
-        ActionEffects {
+    fn new() -> Self {
+        Self {
             creates: vec![],
             reads: vec![],
             updates: vec![],
@@ -65,35 +68,46 @@ pub trait Action: fmt::Debug {
 }
 
 #[derive(Debug)]
-pub struct RemoveAction {
-    path: ObjectPath,
+pub struct ReloadPartitionAction {
+    path: PartitionPath,
 }
 
-impl RemoveAction {
-    pub fn new(path: ObjectPath) -> Self {
+impl ReloadPartitionAction {
+    pub fn new(path: PartitionPath) -> Self {
         Self { path }
     }
 }
 
-impl Action for RemoveAction {
+impl Action for ReloadPartitionAction {
     fn key(&self) -> String {
-        format!("remove({})", self.path)
+        format!("reload({})", self.path)
     }
 
     fn effects(&self, state: &State) -> ActionEffects {
-        let mut effects = ActionEffects::new();
-        effects.delete(self.path.clone());
-        effects
+        // FIXME: Only considers object changes
+        ActionEffects::new()
     }
 
     fn execute(&self, store: &dyn Store, state: &State) -> Result<State> {
-        unimplemented!()
+        let new_state = state.remove_partition(&self.path)?;
+        // FIXME: Finish implementation
+        // store.reload_partition(&self.path)?;
+
+        let objects: HashMap<ObjectKey, ObjectState> = store
+            .list_objects(&self.path)?
+            .into_iter()
+            .map(|key| (key, ObjectState::new_csv(0, 0)))
+            .collect();
+
+        // new_state.insert_partition(PartitionState::new(objects));
+
+        Ok(new_state)
     }
 }
 
 #[derive(Debug)]
 pub struct RemovePartitionAction {
-    path: PartitionPath
+    path: PartitionPath,
 }
 
 impl RemovePartitionAction {
@@ -115,6 +129,36 @@ impl Action for RemovePartitionAction {
     fn execute(&self, store: &dyn Store, state: &State) -> Result<State> {
         let new_state = state.remove_partition(&self.path)?;
         store.remove_partition(&self.path)?;
+
+        Ok(new_state)
+    }
+}
+
+#[derive(Debug)]
+pub struct RemoveObjectAction {
+    path: ObjectPath,
+}
+
+impl RemoveObjectAction {
+    pub fn new(path: ObjectPath) -> Self {
+        Self { path }
+    }
+}
+
+impl Action for RemoveObjectAction {
+    fn key(&self) -> String {
+        format!("remove({})", self.path)
+    }
+
+    fn effects(&self, state: &State) -> ActionEffects {
+        let mut effects = ActionEffects::new();
+        effects.delete(self.path.clone());
+        effects
+    }
+
+    fn execute(&self, store: &dyn Store, state: &State) -> Result<State> {
+        let new_state = state.remove_object(&self.path)?;
+        store.remove_object(&self.path)?;
 
         Ok(new_state)
     }

@@ -23,6 +23,7 @@ pub trait Store {
     fn list_partitions(&self, path: &DatasetPath) -> Result<Vec<Partition>>;
     fn list_objects(&self, path: &PartitionPath) -> Result<Vec<ObjectKey>>;
     fn remove_partition(&self, path: &PartitionPath) -> Result<()>;
+    fn remove_object(&self, path: &ObjectPath) -> Result<()>;
 }
 
 pub struct FileStore {
@@ -113,5 +114,9 @@ impl Store for FileStore {
 
     fn remove_partition(&self, path: &PartitionPath) -> Result<()> {
         Ok(fs::remove_dir(self.fs_path(path.std_path()))?)
+    }
+
+    fn remove_object(&self, path: &ObjectPath) -> Result<()> {
+        Ok(fs::remove_file(self.fs_path(path.std_path()))?)
     }
 }

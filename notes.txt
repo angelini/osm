@@ -1,0 +1,95 @@
+Effects:
+
+    Layers:
+        [0]:
+            example/v=1/a: read
+            example/v=2/a: update
+            example/v=3/a: create
+        [1]:
+            example/v=1/a: remove
+
+
+---
+
+ReloadAll: ()
+
+ReloadDataset:
+    Path: DatasetPath
+
+(reload_dataset, )
+
+CopyDataset:
+    Source: DatasetPath
+    Target: DatasetPath
+
+(copy_dataset, )
+
+MoveDataset:
+    Source: DatasetPath
+    Target: DatasetPath
+
+()
+
+RemoveDataset:
+    Path: DatasetPath
+
+ReloadPartition:
+    Path: PartitionPath
+
+CopyPartition:
+    Source: PartitionPath
+    Target: PartitionPath
+
+MovePartition:
+    Source: PartitionPath
+    Target: PartitionPath
+
+RemovePartition:
+    Path: PartitionPath
+
+CopyObject:
+    Source: ObjectPath
+    Target: ObjectPath
+
+MoveObject:
+    Source: ObjectPath
+    Target: ObjectPath
+
+RemoveObjects:
+    Paths: Vec<ObjectPath>
+
+Sample:
+    Source: DatasetPath
+    Target: DatasetPath
+    Partitions: Vec<Partition>
+    Percent: Int
+
+Repartition:
+    Source: DatasetPath
+    Target: DatasetPath
+    PartitionKeys: Vec<PartitionKey>
+
+Compress:
+    Source: DatasetPath
+    Target: DatasetPath
+    Partitions: Vec<Partition>
+
+Generate:
+    Path: ObjectPath
+    Generator: Generator
+    Count: Int
+
+
+---
+
+[Read Only]
+
+ListObjects:
+    Path: PartitionPath
+
+SizeOf:
+    Path: DatasetPath
+    Partitions: Vec<Partition>
+    Detailed: Bool
+
+---

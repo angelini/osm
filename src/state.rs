@@ -215,4 +215,14 @@ impl State {
 
         Ok(new_state)
     }
+
+    pub fn remove_object(&self, path: &ObjectPath) -> Result<Self> {
+        let mut new_state = self.clone();
+
+        let dataset = new_state.get_mut(&path.dataset_path())?;
+        let partitions = dataset.get_mut(&path.get_partition())?;
+        partitions.objects.remove(&path.key);
+
+        Ok(new_state)
+    }
 }
