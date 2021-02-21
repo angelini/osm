@@ -1,0 +1,47 @@
+objects = [o1, o2, ...]
+
+actions = [a1, a2, ...]
+
+a1 = {
+    o1: read,
+}
+
+a2 = {
+    o1: write,
+    o2: write,
+}
+
+a3 = {
+    o2: read,
+}
+
+a4 = {
+    o1: read
+    o2: write
+}
+
+a5 = {
+    o3: read
+}
+
+a1 << a2 << a3
+         << a4
+a5
+
+---
+
+Include datasets & Partitions
+
+datasets   = [d1, d2, ...]
+partitions = [(d1, p1), (d2, p2), ...]
+objects    = [(d1, p1, o1), (d2, p2, o2), ...]
+
+actions = [a1, a2, ...]
+
+a1 = {
+    d1: read,
+}
+
+a2 = {
+
+}

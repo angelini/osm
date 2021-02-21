@@ -7,7 +7,6 @@ mod reader;
 mod state;
 mod store;
 mod tree;
-mod validator;
 mod writer;
 
 use std::path::PathBuf;

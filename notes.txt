@@ -93,3 +93,75 @@ SizeOf:
     Detailed: Bool
 
 ---
+
+Example use cases
+
+[
+    Reload(d1),
+    Reload(d2),
+    Move(d1, d2),
+    ListPartitions(d2),
+]
+
+By mixing reload, write & read operations we can't anticipate actions.
+
+# Reload ops
+[
+    Reload(d1),
+    Reload(d2)
+]
+
+# State & Store RW operations
+[
+    Move(d1, d2)
+]
+
+# State RO operations
+[
+    ListPartitions(d2)
+]
+
+---
+
+osm exec -ops '''
+reload(d1)
+reload(d2)
+move(d1, d2)
+'''
+
+---
+
+osm move-object o1 o2
+osm reload d1
+
+
+- Every job is a CLI verb
+- Jobs each produce many actions
+- Jobs can depend on paths, these can be reloaded before execution
+- Actions can be re-organized and executed in parallel
+
+Job.dependencies() -> [path]
+Job.actions(state) -> [action]
+Runtime.execute(state, [action]) -> state
+
+- Actions could be returned as a dependency tree
+
+Job.actions(state) -> {action: [action]}
+Runtime.execute(state, {action: [action]}) -> state
+
+fn MovePartition.actions(self, state) -> {action: [action]} {
+    tree = ActionTree.new
+    delete_target_layer = tree.root
+
+    for object in self.target {
+        delete_target_layer.add(remove(object))
+    }
+
+    copy_layer = delete_layer.depends_on
+    delete_source_layer = copy_layer.depends_on
+
+    for object in self.source {
+        copy_layer.add(copy(object, self.target / object))
+        delete_source_layer(remove(object))
+    }
+}
