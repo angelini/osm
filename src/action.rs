@@ -1,8 +1,7 @@
+use std::collections::{HashMap, HashSet};
 use std::fmt;
 
-use im::HashMap;
-
-use crate::base::{ObjectKey};
+use crate::base::ObjectKey;
 use crate::path::{ObjectPath, PartitionPath};
 use crate::state::{ObjectState, State, StateError};
 use crate::store::{Store, StoreError};
@@ -27,47 +26,14 @@ impl From<StoreError> for ActionError {
 
 type Result<T> = std::result::Result<T, ActionError>;
 
-pub struct ActionEffects {
-    creates: Vec<ObjectPath>,
-    reads: Vec<ObjectPath>,
-    updates: Vec<ObjectPath>,
-    deletes: Vec<ObjectPath>,
-}
-
-impl ActionEffects {
-    fn new() -> Self {
-        Self {
-            creates: vec![],
-            reads: vec![],
-            updates: vec![],
-            deletes: vec![],
-        }
-    }
-
-    fn create(&mut self, path: ObjectPath) {
-        self.creates.push(path)
-    }
-
-    fn read(&mut self, path: ObjectPath) {
-        self.reads.push(path)
-    }
-
-    fn update(&mut self, path: ObjectPath) {
-        self.updates.push(path)
-    }
-
-    fn delete(&mut self, path: ObjectPath) {
-        self.deletes.push(path)
-    }
-}
-
 pub trait Action: fmt::Debug {
     fn key(&self) -> String;
-    fn effects(&self, state: &State) -> ActionEffects;
     fn execute(&self, store: &dyn Store, state: &State) -> Result<State>;
 }
 
-#[derive(Debug)]
+pub type Actions = Vec<Box<dyn Action>>;
+
+#[derive(Clone, Debug)]
 pub struct ReloadPartitionAction {
     path: PartitionPath,
 }
@@ -81,11 +47,6 @@ impl ReloadPartitionAction {
 impl Action for ReloadPartitionAction {
     fn key(&self) -> String {
         format!("reload({})", self.path)
-    }
-
-    fn effects(&self, state: &State) -> ActionEffects {
-        // FIXME: Only considers object changes
-        ActionEffects::new()
     }
 
     fn execute(&self, store: &dyn Store, state: &State) -> Result<State> {
@@ -121,11 +82,6 @@ impl Action for RemovePartitionAction {
         format!("rm({}/)", self.path)
     }
 
-    fn effects(&self, state: &State) -> ActionEffects {
-        // FIXME: Only considers object changes
-        ActionEffects::new()
-    }
-
     fn execute(&self, store: &dyn Store, state: &State) -> Result<State> {
         let new_state = state.remove_partition(&self.path)?;
         store.remove_partition(&self.path)?;
@@ -148,12 +104,6 @@ impl RemoveObjectAction {
 impl Action for RemoveObjectAction {
     fn key(&self) -> String {
         format!("remove({})", self.path)
-    }
-
-    fn effects(&self, state: &State) -> ActionEffects {
-        let mut effects = ActionEffects::new();
-        effects.delete(self.path.clone());
-        effects
     }
 
     fn execute(&self, store: &dyn Store, state: &State) -> Result<State> {
@@ -181,23 +131,97 @@ impl Action for MoveAction {
         format!("move({}, {})", self.source, self.target)
     }
 
-    fn effects(&self, state: &State) -> ActionEffects {
-        let mut effects = ActionEffects::new();
-        effects.delete(self.source.clone());
-
-        if state.contains_object(&self.target) {
-            effects.update(self.target.clone());
-        } else {
-            effects.create(self.target.clone());
-        }
-
-        effects
-    }
-
     fn execute(&self, store: &dyn Store, state: &State) -> Result<State> {
         let new_state = state.move_object(&self.source, &self.target)?;
         store.move_object(&self.source, &self.target)?;
 
         Ok(new_state)
+    }
+}
+
+pub type Key = usize;
+pub type Keys = HashSet<Key>;
+
+#[derive(Debug)]
+pub struct ActionTree {
+    next_key: Key,
+    roots: Keys,
+    upstream: HashMap<Key, Keys>,
+    downstream: HashMap<Key, Keys>,
+    actions: HashMap<Key, Actions>,
+}
+
+impl ActionTree {
+    pub fn new() -> Self {
+        Self {
+            next_key: 1,
+            roots: Keys::new(),
+            upstream: HashMap::new(),
+            downstream: HashMap::new(), // FIXME: Is this necessary?
+            actions: HashMap::new(),
+        }
+    }
+
+    pub fn add_node(&mut self, dependencies: &[Key]) -> Key {
+        let key = self.next_key;
+        self.next_key += 1;
+
+        for dependency in dependencies {
+            let upstream = self.upstream.entry(key).or_insert_with(Keys::new);
+            upstream.insert(*dependency);
+
+            let downstream = self.downstream.entry(*dependency).or_insert_with(Keys::new);
+            downstream.insert(key);
+        }
+
+        if dependencies.is_empty() {
+            self.roots.insert(key);
+        }
+
+        key
+    }
+
+    pub fn add_action(&mut self, key: Key, action: Box<dyn Action>) {
+        let entry = self.actions.entry(key).or_insert_with(Vec::new);
+        entry.push(action);
+    }
+
+    pub fn size(&self) -> usize {
+        self.next_key - 1
+    }
+
+    pub fn next_batch(&self, completed: &Keys) -> Vec<(Key, Vec<&dyn Action>)> {
+        if completed.is_empty() {
+            return self
+                .roots
+                .iter()
+                .map(|key| (*key, self.get_actions(key)))
+                .collect();
+        }
+
+        self.upstream
+            .iter()
+            .filter(|(key, upstream_keys)| {
+                !completed.contains(key)
+                    && upstream_keys
+                        .difference(completed)
+                        .collect::<HashSet<&Key>>()
+                        .is_empty()
+            })
+            .map(|(key, _)| (*key, self.get_actions(key)))
+            .collect()
+    }
+
+    fn get_actions(&self, key: &Key) -> Vec<&dyn Action> {
+        if self.actions.contains_key(key) {
+            self.actions
+                .get(key)
+                .unwrap()
+                .iter()
+                .map(|action| action.as_ref())
+                .collect()
+        } else {
+            Vec::new()
+        }
     }
 }

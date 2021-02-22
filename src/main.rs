@@ -1,21 +1,20 @@
 mod action;
 mod base;
 mod generator;
-mod operation;
+mod job;
 mod path;
 mod reader;
 mod state;
 mod store;
-mod tree;
 mod writer;
 
 use std::path::PathBuf;
 
 use arrow::datatypes::{DataType, Field, Schema};
 
-use action::{Action, ActionError};
+use action::{ActionTree, ActionError, Keys};
 use base::{Bucket, Partition, Protocol};
-use operation::{MovePartition, Operation};
+use job::{Job, MovePartition};
 use path::DatasetPath;
 use state::{State, StateError};
 use store::{FileStore, Store, StoreError};
@@ -67,17 +66,23 @@ impl Runtime {
     fn execute(
         &mut self,
         state: State,
-        actions: Vec<Box<dyn Action>>,
+        actions: ActionTree,
     ) -> State {
         let mut current_state = state;
+        let mut completed = Keys::new();
 
-        for action in actions {
-            match action.execute(self.store.as_ref(), &current_state) {
-                Ok(new_state) => {
-                    self.passed.push(action.key());
-                    current_state = new_state;
+        while completed.len() != actions.size() {
+            for (key, actions) in actions.next_batch(&completed) {
+                for action in actions {
+                    match action.execute(self.store.as_ref(), &current_state) {
+                        Ok(new_state) => {
+                            self.passed.push(action.key());
+                            current_state = new_state;
+                        }
+                        Err(error) => self.failed.push((action.key(), error)),
+                    }
                 }
-                Err(error) => self.failed.push((action.key(), error)),
+                completed.insert(key);
             }
         }
 
@@ -95,7 +100,6 @@ fn main() -> Result<()> {
     let path = DatasetPath::new(bucket, PathBuf::from("data/one"));
 
     let state = reader::read_state(&store, vec![path.clone()])?;
-
     print!("Initial {}", state.pretty_print());
 
     let mut runtime = Runtime::new(Box::new(store));
@@ -110,9 +114,7 @@ fn main() -> Result<()> {
         );
 
     let actions = move_partition.actions(&state)?;
-    for action in &actions {
-        println!("action: {}", action.key());
-    }
+    // FIXME: Pretty print ActionTree
 
     let final_state = runtime.execute(state, actions);
 
