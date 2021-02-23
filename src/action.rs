@@ -1,9 +1,11 @@
 use std::collections::{HashMap, HashSet};
 use std::fmt;
 
-use crate::base::ObjectKey;
-use crate::path::{ObjectPath, PartitionPath};
-use crate::state::{ObjectState, State, StateError};
+use im;
+
+use crate::base::Partition;
+use crate::path::{DatasetPath, ObjectPath, PartitionPath};
+use crate::state::{DatasetState, ObjectState, PartitionState, State, StateError};
 use crate::store::{Store, StoreError};
 
 #[derive(Debug)]
@@ -24,7 +26,7 @@ impl From<StoreError> for ActionError {
     }
 }
 
-type Result<T> = std::result::Result<T, ActionError>;
+pub type Result<T> = std::result::Result<T, ActionError>;
 
 pub trait Action: fmt::Debug {
     fn key(&self) -> String;
@@ -32,6 +34,40 @@ pub trait Action: fmt::Debug {
 }
 
 pub type Actions = Vec<Box<dyn Action>>;
+
+#[derive(Clone, Debug)]
+pub struct ReloadDatasetAction {
+    path: DatasetPath,
+}
+
+impl ReloadDatasetAction {
+    pub fn new(path: DatasetPath) -> Self {
+        Self { path }
+    }
+
+    fn load_dataset(&self, store: &dyn Store) -> Result<DatasetState> {
+        Ok(DatasetState::new(
+            store
+                .list_partitions(&self.path)?
+                .into_iter()
+                .map(|partition| {
+                    let action = ReloadPartitionAction::new(self.path.partition_path(&partition));
+                    Ok((partition, action.load_partition(store)?))
+                })
+                .collect::<Result<im::HashMap<Partition, PartitionState>>>()?,
+        ))
+    }
+}
+
+impl Action for ReloadDatasetAction {
+    fn key(&self) -> String {
+        format!("reload({})", self.path)
+    }
+
+    fn execute(&self, store: &dyn Store, state: &State) -> Result<State> {
+        Ok(state.insert_dataset(&self.path, self.load_dataset(store)?)?)
+    }
+}
 
 #[derive(Clone, Debug)]
 pub struct ReloadPartitionAction {
@@ -42,6 +78,16 @@ impl ReloadPartitionAction {
     pub fn new(path: PartitionPath) -> Self {
         Self { path }
     }
+
+    fn load_partition(&self, store: &dyn Store) -> Result<PartitionState> {
+        Ok(PartitionState::new(
+            store
+                .list_objects(&self.path)?
+                .into_iter()
+                .map(|key| (key, ObjectState::new_csv(0, 0)))
+                .collect(),
+        ))
+    }
 }
 
 impl Action for ReloadPartitionAction {
@@ -50,19 +96,7 @@ impl Action for ReloadPartitionAction {
     }
 
     fn execute(&self, store: &dyn Store, state: &State) -> Result<State> {
-        let new_state = state.remove_partition(&self.path)?;
-        // FIXME: Finish implementation
-        // store.reload_partition(&self.path)?;
-
-        let objects: HashMap<ObjectKey, ObjectState> = store
-            .list_objects(&self.path)?
-            .into_iter()
-            .map(|key| (key, ObjectState::new_csv(0, 0)))
-            .collect();
-
-        // new_state.insert_partition(PartitionState::new(objects));
-
-        Ok(new_state)
+        Ok(state.insert_partition(&self.path, self.load_partition(store)?)?)
     }
 }
 
@@ -147,7 +181,6 @@ pub struct ActionTree {
     next_key: Key,
     roots: Keys,
     upstream: HashMap<Key, Keys>,
-    downstream: HashMap<Key, Keys>,
     actions: HashMap<Key, Actions>,
 }
 
@@ -157,9 +190,15 @@ impl ActionTree {
             next_key: 1,
             roots: Keys::new(),
             upstream: HashMap::new(),
-            downstream: HashMap::new(), // FIXME: Is this necessary?
             actions: HashMap::new(),
         }
+    }
+
+    pub fn single(action: Box<dyn Action>) -> Self {
+        let mut tree = Self::new();
+        let key = tree.add_node(&[]);
+        tree.add_action(key, action);
+        tree
     }
 
     pub fn add_node(&mut self, dependencies: &[Key]) -> Key {
@@ -169,9 +208,6 @@ impl ActionTree {
         for dependency in dependencies {
             let upstream = self.upstream.entry(key).or_insert_with(Keys::new);
             upstream.insert(*dependency);
-
-            let downstream = self.downstream.entry(*dependency).or_insert_with(Keys::new);
-            downstream.insert(key);
         }
 
         if dependencies.is_empty() {

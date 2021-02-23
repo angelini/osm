@@ -81,7 +81,7 @@ impl PartitionState {
             .ok_or_else(|| StateError::MissingObject(key.clone()))
     }
 
-    fn remove(&mut self, key: &ObjectKey) -> Result<ObjectState> {
+    fn remove_object(&mut self, key: &ObjectKey) -> Result<ObjectState> {
         self.objects
             .remove(key)
             .ok_or_else(|| StateError::MissingObject(key.clone()))
@@ -114,6 +114,21 @@ impl DatasetState {
         self.get(partition)
             .map(|p_state| p_state.objects.keys().cloned().collect())
     }
+
+    fn remove_object(&mut self, partition: &Partition, key: &ObjectKey) -> Result<ObjectState> {
+        let partition = self.get_mut(partition)?;
+        partition.remove_object(key)
+    }
+
+    fn remove_partition(&mut self, partition: &Partition) -> Result<PartitionState> {
+        self.partitions
+            .remove(partition)
+            .ok_or_else(|| StateError::MissingPartition(partition.clone()))
+    }
+
+    fn insert_partition(&mut self, partition: &Partition, state: PartitionState) {
+        self.partitions.insert(partition.clone(), state);
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -122,9 +137,13 @@ pub struct State {
 }
 
 impl State {
-    pub fn new(datasets: HashMap<DatasetPath, DatasetState>) -> Self {
-        State { datasets }
+    pub fn new() -> Self {
+        State { datasets: HashMap::new() }
     }
+
+    // pub fn new(datasets: HashMap<DatasetPath, DatasetState>) -> Self {
+    //     State { datasets }
+    // }
 
     pub fn pretty_print(&self) -> String {
         let mut s = String::new();
@@ -176,11 +195,7 @@ impl State {
     pub fn list_objects(&self, path: &PartitionPath) -> Result<Vec<ObjectPath>> {
         self.get(&path.dataset)
             .and_then(|ds| ds.list_objects(&path.partition))
-            .map(|keys| {
-                keys.into_iter()
-                    .map(|k| path.object_path(&k))
-                    .collect()
-            })
+            .map(|keys| keys.into_iter().map(|k| path.object_path(&k)).collect())
     }
 
     pub fn move_object(&self, source: &ObjectPath, target: &ObjectPath) -> Result<Self> {
@@ -190,7 +205,7 @@ impl State {
         {
             let source_dataset = new_state.get_mut(source.dataset_path())?;
             let source_partition = source_dataset.get_mut(source.get_partition())?;
-            object_state = source_partition.remove(&source.key)?;
+            object_state = source_partition.remove_object(&source.key)?;
         }
 
         {
@@ -211,7 +226,7 @@ impl State {
         let mut new_state = self.clone();
 
         let dataset = new_state.get_mut(&path.dataset)?;
-        dataset.partitions.remove(&path.partition);
+        dataset.remove_partition(&path.partition)?;
 
         Ok(new_state)
     }
@@ -220,8 +235,24 @@ impl State {
         let mut new_state = self.clone();
 
         let dataset = new_state.get_mut(&path.dataset_path())?;
-        let partitions = dataset.get_mut(&path.get_partition())?;
-        partitions.objects.remove(&path.key);
+        dataset.remove_object(&path.get_partition(), &path.key)?;
+
+        Ok(new_state)
+    }
+
+    pub fn insert_dataset(&self, path: &DatasetPath, state: DatasetState) -> Result<Self> {
+        let mut new_state = self.clone();
+
+        new_state.datasets.insert(path.clone(), state);
+
+        Ok(new_state)
+    }
+
+    pub fn insert_partition(&self, path: &PartitionPath, state: PartitionState) -> Result<Self> {
+        let mut new_state = self.clone();
+
+        let dataset = new_state.get_mut(&path.dataset)?;
+        dataset.insert_partition(&path.partition, state);
 
         Ok(new_state)
     }

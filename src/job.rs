@@ -1,11 +1,28 @@
-use crate::action::{ActionTree, MoveAction, RemoveObjectAction, RemovePartitionAction};
+use crate::action::{
+    ActionTree, MoveAction, ReloadDatasetAction, RemoveObjectAction, RemovePartitionAction,
+};
 use crate::path::{DatasetPath, PartitionPath};
 use crate::state::{Result as StateResult, State};
 
 pub trait Job {
-    // FIXME: This should be any type of path
-    fn dependencies(&self) -> Vec<DatasetPath>;
     fn actions(&self, state: &State) -> StateResult<ActionTree>;
+}
+
+pub struct ReloadDataset {
+    path: DatasetPath,
+}
+
+impl ReloadDataset {
+    pub fn new(path: DatasetPath) -> Self {
+        ReloadDataset { path }
+    }
+}
+
+impl Job for ReloadDataset {
+    fn actions(&self, _: &State) -> StateResult<ActionTree> {
+        let reload = ReloadDatasetAction::new(self.path.clone());
+        Ok(ActionTree::single(Box::new(reload)))
+    }
 }
 
 pub struct MovePartition {
@@ -20,10 +37,6 @@ impl MovePartition {
 }
 
 impl Job for MovePartition {
-    fn dependencies(&self) -> Vec<DatasetPath> {
-        unimplemented!()
-    }
-
     fn actions(&self, state: &State) -> StateResult<ActionTree> {
         let mut actions = ActionTree::new();
 
@@ -33,7 +46,7 @@ impl Job for MovePartition {
             for object in state.list_objects(&self.target)? {
                 actions.add_action(
                     remove_target_node,
-                    Box::new(RemoveObjectAction::new(object))
+                    Box::new(RemoveObjectAction::new(object)),
                 )
             }
         }
@@ -43,16 +56,13 @@ impl Job for MovePartition {
         for object in state.list_objects(&self.source)? {
             // FIXME: Object stores support copy and not move
             let target = object.update_partition(&self.target.partition);
-            actions.add_action(
-                copy_node,
-                Box::new(MoveAction::new(object, target)),
-            )
+            actions.add_action(copy_node, Box::new(MoveAction::new(object, target)))
         }
 
         let remove_partition_node = actions.add_node(&[copy_node]);
         actions.add_action(
             remove_partition_node,
-            Box::new(RemovePartitionAction::new(self.source.clone()))
+            Box::new(RemovePartitionAction::new(self.source.clone())),
         );
 
         Ok(actions)

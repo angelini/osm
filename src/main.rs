@@ -3,7 +3,6 @@ mod base;
 mod generator;
 mod job;
 mod path;
-mod reader;
 mod state;
 mod store;
 mod writer;
@@ -12,41 +11,12 @@ use std::path::PathBuf;
 
 use arrow::datatypes::{DataType, Field, Schema};
 
-use action::{ActionTree, ActionError, Keys};
+use action::{ActionTree, ActionError, Result, Keys};
 use base::{Bucket, Partition, Protocol};
-use job::{Job, MovePartition};
+use job::{Job, MovePartition, ReloadDataset};
 use path::DatasetPath;
-use state::{State, StateError};
-use store::{FileStore, Store, StoreError};
-
-#[derive(Debug)]
-enum RuntimeError {
-    State(StateError),
-    Store(StoreError),
-}
-
-impl From<StateError> for RuntimeError {
-    fn from(error: StateError) -> Self {
-        Self::State(error)
-    }
-}
-
-impl From<StoreError> for RuntimeError {
-    fn from(error: StoreError) -> Self {
-        Self::Store(error)
-    }
-}
-
-impl From<ActionError> for RuntimeError {
-    fn from(error: ActionError) -> Self {
-        match error {
-            ActionError::Store(e) => RuntimeError::Store(e),
-            ActionError::State(e) => RuntimeError::State(e),
-        }
-    }
-}
-
-type Result<T> = std::result::Result<T, RuntimeError>;
+use state::State;
+use store::{FileStore, Store};
 
 struct Runtime {
     store: Box<dyn Store>,
@@ -65,13 +35,15 @@ impl Runtime {
 
     fn execute(
         &mut self,
-        state: State,
+        state: &State,
         actions: ActionTree,
     ) -> State {
-        let mut current_state = state;
+        let mut current_state = state.clone();
         let mut completed = Keys::new();
 
         while completed.len() != actions.size() {
+            let mut error_count = 0;
+
             for (key, actions) in actions.next_batch(&completed) {
                 for action in actions {
                     match action.execute(self.store.as_ref(), &current_state) {
@@ -79,10 +51,17 @@ impl Runtime {
                             self.passed.push(action.key());
                             current_state = new_state;
                         }
-                        Err(error) => self.failed.push((action.key(), error)),
+                        Err(error) => {
+                            error_count += 1;
+                            self.failed.push((action.key(), error))
+                        },
                     }
                 }
                 completed.insert(key);
+            }
+
+            if error_count > 0 {
+                return current_state
             }
         }
 
@@ -99,29 +78,25 @@ fn main() -> Result<()> {
     let bucket = Bucket::new(Protocol::File, "example".to_string());
     let path = DatasetPath::new(bucket, PathBuf::from("data/one"));
 
-    let state = reader::read_state(&store, vec![path.clone()])?;
-    print!("Initial {}", state.pretty_print());
-
     let mut runtime = Runtime::new(Box::new(store));
+    let mut state = State::new();
+    println!("state-0: {}", state.pretty_print());
 
-    let source = path.partition_path(&Partition::new("v", "1"));
-    let target = path.partition_path(&Partition::new("v", "10"));
-
+    let reload = ReloadDataset::new(path.clone());
     let move_partition =
         MovePartition::new(
-            source,
-            target,
+            path.partition_path(&Partition::new("v", "1")),
+            path.partition_path(&Partition::new("v", "10")),
         );
 
-    let actions = move_partition.actions(&state)?;
-    // FIXME: Pretty print ActionTree
+    state = runtime.execute(&state, reload.actions(&state)?);
+    println!("state-1: {}", state.pretty_print());
 
-    let final_state = runtime.execute(state, actions);
+    state = runtime.execute(&state, move_partition.actions(&state)?);
+    println!("state-2: {}", state.pretty_print());
 
     println!("passed: {:?}", runtime.passed);
     println!("failed: {:?}", runtime.failed);
-
-    print!("\nFinal {}", final_state.pretty_print());
 
     Ok(())
 }
