@@ -1,5 +1,6 @@
 use std::ffi::OsStr;
 use std::fmt;
+use std::ops::Add;
 use std::path::PathBuf;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -41,6 +42,10 @@ impl ObjectKey {
 
     pub fn as_str(&self) -> &str {
         &self.0
+    }
+
+    pub fn extension(&self) -> Option<&str> {
+        self.0.split('.').collect::<Vec<&str>>().get(1).copied()
     }
 }
 
@@ -116,5 +121,42 @@ pub struct Output(String);
 impl fmt::Display for Output {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "{}", self.0)
+    }
+}
+
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+pub struct Bytes(usize);
+
+impl Bytes {
+    const KIB: usize = 1024;
+    const MIB: usize = Self::KIB * 1024;
+
+    const KIB_THRESHOLD: usize = 10 * Self::KIB;
+    const MIB_THRESHOLD: usize = 10 * Self::MIB;
+
+    pub fn new(size: usize) -> Self {
+        Self(size)
+    }
+}
+
+impl fmt::Display for Bytes {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self.0 {
+            size if size > Self::MIB_THRESHOLD => {
+                write!(f, "{:.3} MiB", size as f64 / Self::MIB as f64)
+            }
+            size if size > Self::KIB_THRESHOLD => {
+                write!(f, "{:.3} KiB", size as f64 / Self::KIB as f64)
+            }
+            size => write!(f, "{} B", size),
+        }
+    }
+}
+
+impl Add for Bytes {
+    type Output = Self;
+
+    fn add(self, other: Self) -> Self {
+        Self::new(self.0 + other.0)
     }
 }

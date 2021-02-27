@@ -1,9 +1,7 @@
 use std::collections::{HashMap, HashSet};
 use std::fmt;
 
-use im;
-
-use crate::base::Partition;
+use crate::base::{ObjectKey, Partition};
 use crate::path::{DatasetPath, ObjectPath, PartitionPath};
 use crate::state::{DatasetState, ObjectState, PartitionState, State, StateError};
 use crate::store::{Store, StoreError};
@@ -84,8 +82,12 @@ impl ReloadPartitionAction {
             store
                 .list_objects(&self.path)?
                 .into_iter()
-                .map(|key| (key, ObjectState::new_csv(0, 0)))
-                .collect(),
+                .map(|key| {
+                    let path = self.path.object_path(&key);
+                    let state = store.read_object(&path)?;
+                    Ok((key, state))
+                })
+                .collect::<Result<im::HashMap<ObjectKey, ObjectState>>>()?,
         ))
     }
 }

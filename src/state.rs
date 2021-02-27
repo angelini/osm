@@ -1,8 +1,9 @@
-use im::HashMap;
+use std::fmt;
 
+use im::HashMap;
 use parquet::schema::types::Type as ParquetType;
 
-use crate::base::{Compression, ObjectKey, Partition};
+use crate::base::{Bytes, Compression, ObjectKey, Partition};
 use crate::path::{DatasetPath, ObjectPath, PartitionPath};
 
 #[derive(Debug)]
@@ -31,9 +32,13 @@ impl CsvFormatState {
 
 #[derive(Debug, Clone)]
 struct ParquetFormatState {
-    compression: Compression,
-    num_rows: i64,
     schema: ParquetType,
+}
+
+impl ParquetFormatState {
+    fn new(schema: ParquetType) -> Self {
+        Self { schema }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -42,20 +47,47 @@ enum FormatState {
     Parquet(ParquetFormatState),
 }
 
+impl fmt::Display for FormatState {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            FormatState::Csv(_) => write!(f, "Csv"),
+            FormatState::Parquet(_) => write!(f, "Parquet"),
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct ObjectState {
     format: FormatState,
     count: usize,
-    size: usize,
+    size: Bytes,
 }
 
 impl ObjectState {
-    pub fn new_csv(count: usize, size: usize) -> Self {
+    pub fn new_csv(count: usize, size: Bytes) -> Self {
         ObjectState {
             format: FormatState::Csv(CsvFormatState::default()),
             count,
             size,
         }
+    }
+
+    pub fn new_parquet(count: usize, size: Bytes, type_: ParquetType) -> Self {
+        ObjectState {
+            format: FormatState::Parquet(ParquetFormatState::new(type_)),
+            count,
+            size,
+        }
+    }
+}
+
+impl fmt::Display for ObjectState {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(
+            f,
+            "Object(count: {}, size: {}, format: {})",
+            self.count, self.size, self.format
+        )
     }
 }
 
@@ -79,6 +111,13 @@ impl PartitionState {
         self.objects
             .get_mut(key)
             .ok_or_else(|| StateError::MissingObject(key.clone()))
+    }
+
+    fn size(&self) -> Bytes {
+        self.objects
+            .iter()
+            .map(|(_, obj)| obj.size)
+            .fold(Bytes::new(0), |acc, obj_size| acc + obj_size)
     }
 
     fn remove_object(&mut self, key: &ObjectKey) -> Result<ObjectState> {
@@ -110,7 +149,7 @@ impl DatasetState {
             .ok_or_else(|| StateError::MissingPartition(partition.clone()))
     }
 
-    pub fn list_objects(&self, partition: &Partition) -> Result<Vec<ObjectKey>> {
+    fn list_objects(&self, partition: &Partition) -> Result<Vec<ObjectKey>> {
         self.get(partition)
             .map(|p_state| p_state.objects.keys().cloned().collect())
     }
@@ -138,27 +177,9 @@ pub struct State {
 
 impl State {
     pub fn new() -> Self {
-        State { datasets: HashMap::new() }
-    }
-
-    // pub fn new(datasets: HashMap<DatasetPath, DatasetState>) -> Self {
-    //     State { datasets }
-    // }
-
-    pub fn pretty_print(&self) -> String {
-        let mut s = String::new();
-        s.push_str("State:\n");
-        for (ds_path, ds_state) in &self.datasets {
-            s.push_str(&format!("  - {}:\n", ds_path));
-            for (part, pt_state) in &ds_state.partitions {
-                s.push_str(&format!("    {}:\n", part));
-                for (key, ob_state) in &pt_state.objects {
-                    s.push_str(&format!("      {}: {:?}\n", key, ob_state));
-                }
-            }
-            s.push_str("\n");
+        State {
+            datasets: HashMap::new(),
         }
-        s
     }
 
     fn get(&self, dataset: &DatasetPath) -> Result<&DatasetState> {
@@ -192,10 +213,22 @@ impl State {
         }
     }
 
+    pub fn list_partitions(&self, path: &DatasetPath) -> Result<Vec<PartitionPath>> {
+        self.get(path)
+            .map(|ds| ds.partitions.keys().collect::<Vec<&Partition>>())
+            .map(|parts| parts.into_iter().map(|p| path.partition_path(p)).collect())
+    }
+
     pub fn list_objects(&self, path: &PartitionPath) -> Result<Vec<ObjectPath>> {
         self.get(&path.dataset)
             .and_then(|ds| ds.list_objects(&path.partition))
             .map(|keys| keys.into_iter().map(|k| path.object_path(&k)).collect())
+    }
+
+    pub fn get_partition_size(&self, path: &PartitionPath) -> Result<Bytes> {
+        self.get(&path.dataset)
+            .and_then(|ds| ds.get(&path.partition))
+            .map(|partition| partition.size())
     }
 
     pub fn move_object(&self, source: &ObjectPath, target: &ObjectPath) -> Result<Self> {
@@ -255,5 +288,22 @@ impl State {
         dataset.insert_partition(&path.partition, state);
 
         Ok(new_state)
+    }
+}
+
+impl fmt::Display for State {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        writeln!(f, "State:")?;
+        for (ds_path, ds_state) in &self.datasets {
+            writeln!(f, "  - {}:", ds_path)?;
+            for (part, pt_state) in &ds_state.partitions {
+                writeln!(f, "    {}:", part)?;
+                for (key, ob_state) in &pt_state.objects {
+                    writeln!(f, "      {}: {}", key, ob_state)?;
+                }
+            }
+            writeln!(f)?;
+        }
+        Ok(())
     }
 }

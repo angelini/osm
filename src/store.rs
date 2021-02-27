@@ -2,12 +2,18 @@ use std::fs;
 use std::io;
 use std::path::PathBuf;
 
-use crate::base::{ObjectKey, Partition, ToStdPath};
+use parquet::errors::ParquetError;
+
+use crate::base::{Bytes, Format, ObjectKey, Partition, ToStdPath};
 use crate::path::{DatasetPath, ObjectPath, PartitionPath};
+use crate::parquet::read_object_state;
+use crate::state::ObjectState;
 
 #[derive(Debug)]
 pub enum StoreError {
     Io(io::Error),
+    Parquet(ParquetError),
+    CannotInferSchema(ObjectPath),
 }
 
 impl From<io::Error> for StoreError {
@@ -16,9 +22,16 @@ impl From<io::Error> for StoreError {
     }
 }
 
+impl From<ParquetError> for StoreError {
+    fn from(error: ParquetError) -> StoreError {
+        StoreError::Parquet(error)
+    }
+}
+
 pub type Result<T> = std::result::Result<T, StoreError>;
 
 pub trait Store {
+    fn read_object(&self, path: &ObjectPath) -> Result<ObjectState>;
     fn move_object(&self, source: &ObjectPath, target: &ObjectPath) -> Result<()>;
     fn list_partitions(&self, path: &DatasetPath) -> Result<Vec<Partition>>;
     fn list_objects(&self, path: &PartitionPath) -> Result<Vec<ObjectKey>>;
@@ -43,6 +56,19 @@ impl FileStore {
 }
 
 impl Store for FileStore {
+    fn read_object(&self, path: &ObjectPath) -> Result<ObjectState> {
+        let fs_path = self.fs_path(path.std_path());
+        let file = fs::File::open(fs_path)?;
+
+        let state = match path.infer_format() {
+            Some(Format::Csv) => ObjectState::new_csv(0, Bytes::new(0)),
+            Some(Format::Parquet) => read_object_state(&file)?,
+            None => return Err(StoreError::CannotInferSchema(path.clone())),
+        };
+
+        Ok(state)
+    }
+
     fn move_object(&self, source: &ObjectPath, target: &ObjectPath) -> Result<()> {
         let fs_source = self.fs_path(source.std_path());
         let fs_target = self.fs_path(target.std_path());

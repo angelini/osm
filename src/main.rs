@@ -1,22 +1,21 @@
 mod action;
 mod base;
-mod generator;
 mod job;
+mod parquet;
 mod path;
 mod state;
 mod store;
-mod writer;
+mod view;
 
 use std::path::PathBuf;
 
-use arrow::datatypes::{DataType, Field, Schema};
-
-use action::{ActionTree, ActionError, Result, Keys};
+use action::{ActionError, ActionTree, Keys, Result};
 use base::{Bucket, Partition, Protocol};
 use job::{Job, MovePartition, ReloadDataset};
 use path::DatasetPath;
 use state::State;
 use store::{FileStore, Store};
+use view::{ListPartitions, View};
 
 struct Runtime {
     store: Box<dyn Store>,
@@ -33,11 +32,7 @@ impl Runtime {
         }
     }
 
-    fn execute(
-        &mut self,
-        state: &State,
-        actions: ActionTree,
-    ) -> State {
+    fn execute(&mut self, state: &State, actions: ActionTree) -> State {
         let mut current_state = state.clone();
         let mut completed = Keys::new();
 
@@ -54,14 +49,14 @@ impl Runtime {
                         Err(error) => {
                             error_count += 1;
                             self.failed.push((action.key(), error))
-                        },
+                        }
                     }
                 }
                 completed.insert(key);
             }
 
             if error_count > 0 {
-                return current_state
+                return current_state;
             }
         }
 
@@ -70,33 +65,34 @@ impl Runtime {
 }
 
 fn main() -> Result<()> {
-    let schema = Schema::new(vec![Field::new("value", DataType::Int64, false)]);
-
-    let root = PathBuf::from("/tmp/osm-root");
-    let store = FileStore::new(root);
+    let store = FileStore::new(PathBuf::from("/tmp/osm-root"));
 
     let bucket = Bucket::new(Protocol::File, "example".to_string());
-    let path = DatasetPath::new(bucket, PathBuf::from("data/one"));
+    let path = DatasetPath::new(bucket, PathBuf::from("nyc_taxis"));
 
     let mut runtime = Runtime::new(Box::new(store));
     let mut state = State::new();
-    println!("state-0: {}", state.pretty_print());
+    println!("state-0: {}", state);
 
     let reload = ReloadDataset::new(path.clone());
-    let move_partition =
-        MovePartition::new(
-            path.partition_path(&Partition::new("v", "1")),
-            path.partition_path(&Partition::new("v", "10")),
-        );
+    let move_partition = MovePartition::new(
+        path.partition_path(&Partition::new("date", "2020-01")),
+        path.partition_path(&Partition::new("date", "2021-01")),
+    );
 
     state = runtime.execute(&state, reload.actions(&state)?);
-    println!("state-1: {}", state.pretty_print());
+    println!("state-1: {}", state);
+    println!("passed: {:#?}", runtime.passed);
+    println!("failed: {:#?}", runtime.failed);
+    println!("\n---\n");
 
     state = runtime.execute(&state, move_partition.actions(&state)?);
-    println!("state-2: {}", state.pretty_print());
+    println!("state-2: {}", state);
+    println!("passed: {:#?}", runtime.passed);
+    println!("failed: {:#?}", runtime.failed);
+    println!("\n---\n");
 
-    println!("passed: {:?}", runtime.passed);
-    println!("failed: {:?}", runtime.failed);
+    println!("{}", ListPartitions::new(path).render(&state)?);
 
     Ok(())
 }

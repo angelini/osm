@@ -1,7 +1,7 @@
 use std::fmt;
 use std::path::{PathBuf};
 
-use crate::base::{Bucket, ObjectKey, Partition, ToStdPath};
+use crate::base::{Bucket, Format, ObjectKey, Partition, ToStdPath};
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct DatasetPath {
@@ -103,6 +103,15 @@ impl ObjectPath {
         ObjectPath {
             partition: PartitionPath::new(self.partition.dataset.clone(), partition.clone()),
             key: self.key.clone(),
+        }
+    }
+
+    pub fn infer_format(&self) -> Option<Format> {
+        match self.key.extension() {
+            Some("csv") => Some(Format::Csv),
+            Some("parquet") => Some(Format::Parquet),
+            Some(_) => None,
+            None => None,
         }
     }
 }
