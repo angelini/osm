@@ -16,7 +16,7 @@ pub enum StateError {
 pub type Result<T> = std::result::Result<T, StateError>;
 
 #[derive(Debug, Clone)]
-struct CsvFormatState {
+pub struct CsvFormatState {
     compression: Compression,
     delimiter: String,
 }
@@ -31,7 +31,7 @@ impl CsvFormatState {
 }
 
 #[derive(Debug, Clone)]
-struct ParquetFormatState {
+pub struct ParquetFormatState {
     schema: ParquetType,
 }
 
@@ -42,7 +42,7 @@ impl ParquetFormatState {
 }
 
 #[derive(Debug, Clone)]
-enum FormatState {
+pub enum FormatState {
     Csv(CsvFormatState),
     Parquet(ParquetFormatState),
 }
@@ -58,24 +58,24 @@ impl fmt::Display for FormatState {
 
 #[derive(Debug, Clone)]
 pub struct ObjectState {
-    format: FormatState,
-    count: usize,
-    size: Bytes,
+    pub format: FormatState,
+    pub rows: usize,
+    pub size: Bytes,
 }
 
 impl ObjectState {
-    pub fn new_csv(count: usize, size: Bytes) -> Self {
+    pub fn new_csv(rows: usize, size: Bytes) -> Self {
         ObjectState {
             format: FormatState::Csv(CsvFormatState::default()),
-            count,
+            rows,
             size,
         }
     }
 
-    pub fn new_parquet(count: usize, size: Bytes, type_: ParquetType) -> Self {
+    pub fn new_parquet(rows: usize, size: Bytes, type_: ParquetType) -> Self {
         ObjectState {
             format: FormatState::Parquet(ParquetFormatState::new(type_)),
-            count,
+            rows,
             size,
         }
     }
@@ -85,8 +85,8 @@ impl fmt::Display for ObjectState {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(
             f,
-            "Object(count: {}, size: {}, format: {})",
-            self.count, self.size, self.format
+            "Object(rows: {}, size: {}, format: {})",
+            self.rows, self.size, self.format
         )
     }
 }
@@ -113,7 +113,7 @@ impl PartitionState {
             .ok_or_else(|| StateError::MissingObject(key.clone()))
     }
 
-    fn size(&self) -> Bytes {
+    pub fn size(&self) -> Bytes {
         self.objects
             .iter()
             .map(|(_, obj)| obj.size)
@@ -182,16 +182,28 @@ impl State {
         }
     }
 
-    fn get(&self, dataset: &DatasetPath) -> Result<&DatasetState> {
+    fn get(&self, path: &DatasetPath) -> Result<&DatasetState> {
         self.datasets
-            .get(dataset)
-            .ok_or_else(|| StateError::MissingDataset(dataset.clone()))
+            .get(path)
+            .ok_or_else(|| StateError::MissingDataset(path.clone()))
     }
 
-    fn get_mut(&mut self, dataset: &DatasetPath) -> Result<&mut DatasetState> {
+    fn get_mut(&mut self, path: &DatasetPath) -> Result<&mut DatasetState> {
         self.datasets
-            .get_mut(dataset)
-            .ok_or_else(|| StateError::MissingDataset(dataset.clone()))
+            .get_mut(path)
+            .ok_or_else(|| StateError::MissingDataset(path.clone()))
+    }
+
+    pub fn get_partition(&self, path: &PartitionPath) -> Result<&PartitionState> {
+        self.get(&path.dataset)
+            .and_then(|ds| ds.get(&path.partition))
+    }
+
+
+    pub fn get_object(&self, path: &ObjectPath) -> Result<&ObjectState> {
+        self.get(&path.dataset_path())
+            .and_then(|ds| ds.get(&path.get_partition()))
+            .and_then(|pt| pt.get(&path.key))
     }
 
     pub fn contains_partition(&self, path: &PartitionPath) -> bool {
@@ -223,12 +235,6 @@ impl State {
         self.get(&path.dataset)
             .and_then(|ds| ds.list_objects(&path.partition))
             .map(|keys| keys.into_iter().map(|k| path.object_path(&k)).collect())
-    }
-
-    pub fn get_partition_size(&self, path: &PartitionPath) -> Result<Bytes> {
-        self.get(&path.dataset)
-            .and_then(|ds| ds.get(&path.partition))
-            .map(|partition| partition.size())
     }
 
     pub fn move_object(&self, source: &ObjectPath, target: &ObjectPath) -> Result<Self> {

@@ -143,10 +143,10 @@ impl fmt::Display for Bytes {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self.0 {
             size if size > Self::MIB_THRESHOLD => {
-                write!(f, "{:.3} MiB", size as f64 / Self::MIB as f64)
+                write!(f, "{:.2} MiB", size as f64 / Self::MIB as f64)
             }
             size if size > Self::KIB_THRESHOLD => {
-                write!(f, "{:.3} KiB", size as f64 / Self::KIB as f64)
+                write!(f, "{:.2} KiB", size as f64 / Self::KIB as f64)
             }
             size => write!(f, "{} B", size),
         }

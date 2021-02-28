@@ -74,25 +74,24 @@ fn main() -> Result<()> {
     let mut state = State::new();
     println!("state-0: {}", state);
 
+    let updated_partition = path.partition_path(&Partition::new("date", "2021-01"));
+
     let reload = ReloadDataset::new(path.clone());
     let move_partition = MovePartition::new(
         path.partition_path(&Partition::new("date", "2020-01")),
-        path.partition_path(&Partition::new("date", "2021-01")),
+        updated_partition.clone(),
     );
 
     state = runtime.execute(&state, reload.actions(&state)?);
-    println!("state-1: {}", state);
-    println!("passed: {:#?}", runtime.passed);
+    println!("{}", ListPartitions::new(path.clone(), true).render(&state)?);
+    println!("\npassed: {:#?}", runtime.passed);
     println!("failed: {:#?}", runtime.failed);
     println!("\n---\n");
 
     state = runtime.execute(&state, move_partition.actions(&state)?);
-    println!("state-2: {}", state);
-    println!("passed: {:#?}", runtime.passed);
+    println!("{}", ListPartitions::new(path.clone(), true).render(&state)?);
+    println!("\npassed: {:#?}", runtime.passed);
     println!("failed: {:#?}", runtime.failed);
-    println!("\n---\n");
-
-    println!("{}", ListPartitions::new(path).render(&state)?);
 
     Ok(())
 }
