@@ -1,6 +1,7 @@
 use crate::action::{
-    ActionTree, MoveAction, ReloadDatasetAction, RemoveObjectAction, RemovePartitionAction,
+    ActionTree, MoveAction, RebalanceAction, ReloadDatasetAction, RemoveObjectAction, RemovePartitionAction,
 };
+use crate::base::Bytes;
 use crate::path::{DatasetPath, PartitionPath};
 use crate::state::{Result as StateResult, State};
 
@@ -64,6 +65,41 @@ impl Job for MovePartition {
             remove_partition_node,
             Box::new(RemovePartitionAction::new(self.source.clone())),
         );
+
+        Ok(actions)
+    }
+}
+
+pub struct RebalanceObjects {
+    path: PartitionPath,
+    target_size: Bytes,
+}
+
+impl RebalanceObjects {
+    pub fn new(path: PartitionPath, target_size: Bytes) -> Self {
+        Self { path, target_size }
+    }
+}
+
+impl Job for RebalanceObjects {
+    fn actions(&self, state: &State) -> StateResult<ActionTree> {
+        let mut actions = ActionTree::new();
+        let partition_size = state.get_partition(&self.path)?.size();
+
+        if partition_size < self.target_size.grow(1.5) {
+            return Ok(actions)
+        }
+
+        let objects = state.list_objects(&self.path)?;
+        let target_count = partition_size.div(self.target_size);
+
+        let rebalance_node = actions.add_node(&[]);
+        actions.add_action(rebalance_node, Box::new(RebalanceAction::new(objects.clone(), target_count)));
+
+        let delete_node = actions.add_node(&[]);
+        for object in &objects {
+            actions.add_action(delete_node, Box::new(RemoveObjectAction::new(object.clone())))
+        }
 
         Ok(actions)
     }

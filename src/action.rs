@@ -175,6 +175,55 @@ impl Action for MoveAction {
     }
 }
 
+#[derive(Debug)]
+pub struct RebalanceAction {
+    paths: Vec<ObjectPath>,
+    count: usize,
+}
+
+impl RebalanceAction {
+    pub fn new(paths: Vec<ObjectPath>, count: usize) -> Self {
+        Self { paths, count }
+    }
+}
+
+impl Action for RebalanceAction {
+    fn key(&self) -> String {
+        let paths = self
+            .paths
+            .iter()
+            .map(|p| format!("{}", p))
+            .collect::<Vec<String>>();
+        format!("rebalance({}, {})", paths.join(", "), self.count)
+    }
+
+    fn execute(&self, store: &dyn Store, state: &State) -> Result<State> {
+        let total_rows: usize = self
+            .paths
+            .iter()
+            .map(|path| state.get_object(path).map_or(0, |object| object.rows))
+            .sum();
+        let rows_per_file = total_rows / self.count;
+
+        let output_paths = (0..self.count)
+            .map(|idx| {
+                self.paths[0]
+                    .partition_path()
+                    .object_path(&ObjectKey::new(format!("{}.parquet", idx)))
+            })
+            .collect::<Vec<ObjectPath>>();
+
+        let object_states = store.rebalance_objects(self.paths.as_slice(), &output_paths, rows_per_file)?;
+
+        let mut new_state = state.clone();
+        for (path, object_state) in output_paths.iter().zip(object_states) {
+            new_state = new_state.insert_object(path, object_state)?;
+        }
+
+        Ok(new_state)
+    }
+}
+
 pub type Key = usize;
 pub type Keys = HashSet<Key>;
 

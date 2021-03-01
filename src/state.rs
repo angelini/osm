@@ -120,6 +120,10 @@ impl PartitionState {
             .fold(Bytes::new(0), |acc, obj_size| acc + obj_size)
     }
 
+    fn insert_object(&mut self, key: ObjectKey, state: ObjectState) {
+        self.objects.insert(key, state);
+    }
+
     fn remove_object(&mut self, key: &ObjectKey) -> Result<ObjectState> {
         self.objects
             .remove(key)
@@ -292,6 +296,16 @@ impl State {
 
         let dataset = new_state.get_mut(&path.dataset)?;
         dataset.insert_partition(&path.partition, state);
+
+        Ok(new_state)
+    }
+
+    pub fn insert_object(&self, path: &ObjectPath, state: ObjectState) -> Result<Self> {
+        let mut new_state = self.clone();
+
+        let dataset = new_state.get_mut(&path.dataset_path())?;
+        let partition = dataset.get_mut(&path.get_partition())?;
+        partition.insert_object(path.key.clone(), state);
 
         Ok(new_state)
     }

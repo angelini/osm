@@ -5,8 +5,8 @@ use std::path::PathBuf;
 use parquet::errors::ParquetError;
 
 use crate::base::{Bytes, Format, ObjectKey, Partition, ToStdPath};
+use crate::parquet::{combine_objects, read_object_state};
 use crate::path::{DatasetPath, ObjectPath, PartitionPath};
-use crate::parquet::read_object_state;
 use crate::state::ObjectState;
 
 #[derive(Debug)]
@@ -37,6 +37,12 @@ pub trait Store {
     fn list_objects(&self, path: &PartitionPath) -> Result<Vec<ObjectKey>>;
     fn remove_partition(&self, path: &PartitionPath) -> Result<()>;
     fn remove_object(&self, path: &ObjectPath) -> Result<()>;
+    fn rebalance_objects(
+        &self,
+        input_paths: &[ObjectPath],
+        output_paths: &[ObjectPath],
+        rows_per_file: usize,
+    ) -> Result<Vec<ObjectState>>;
 }
 
 pub struct FileStore {
@@ -144,5 +150,34 @@ impl Store for FileStore {
 
     fn remove_object(&self, path: &ObjectPath) -> Result<()> {
         Ok(fs::remove_file(self.fs_path(path.std_path()))?)
+    }
+
+    fn rebalance_objects(
+        &self,
+        input_paths: &[ObjectPath],
+        output_paths: &[ObjectPath],
+        rows_per_file: usize,
+    ) -> Result<Vec<ObjectState>> {
+        let input_files = input_paths
+            .iter()
+            .map(|path| Ok(fs::File::open(self.fs_path(path.std_path()))?))
+            .collect::<Result<Vec<fs::File>>>()?;
+
+        let output_files = output_paths
+            .iter()
+            .map(|path| Ok(fs::File::create(self.fs_path(path.std_path()))?))
+            .collect::<Result<Vec<fs::File>>>()?;
+
+        combine_objects(input_files, output_files, rows_per_file)?;
+
+        let states = output_paths
+            .iter()
+            .map(|path| {
+                let file = fs::File::open(self.fs_path(path.std_path()))?;
+                read_object_state(&file)
+            })
+            .collect::<std::result::Result<Vec<ObjectState>, ParquetError>>()?;
+
+        Ok(states)
     }
 }

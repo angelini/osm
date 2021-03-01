@@ -36,8 +36,12 @@ impl fmt::Display for Protocol {
 pub struct ObjectKey(String);
 
 impl ObjectKey {
+    pub fn new(s: String) -> Self {
+        Self(s)
+    }
+
     pub fn from_os_str(s: &OsStr) -> Self {
-        ObjectKey(s.to_string_lossy().to_string())
+        Self(s.to_string_lossy().to_string())
     }
 
     pub fn as_str(&self) -> &str {
@@ -124,7 +128,7 @@ impl fmt::Display for Output {
     }
 }
 
-#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+#[derive(Debug, Copy, Clone, Eq, Ord, PartialEq, PartialOrd)]
 pub struct Bytes(usize);
 
 impl Bytes {
@@ -136,6 +140,22 @@ impl Bytes {
 
     pub fn new(size: usize) -> Self {
         Self(size)
+    }
+
+    pub fn new_in_kib(size: usize) -> Self {
+        Self(size * Self::KIB)
+    }
+
+    pub fn new_in_mib(size: usize) -> Self {
+        Self(size * Self::MIB)
+    }
+
+    pub fn grow(&self, multiplier: f64) -> Self {
+        Self((self.0 as f64 * multiplier) as usize)
+    }
+
+    pub fn div(&self, other: Bytes) -> usize {
+        (self.0 as f64 / other.0 as f64).ceil() as usize
     }
 }
 

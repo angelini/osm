@@ -10,8 +10,8 @@ mod view;
 use std::path::PathBuf;
 
 use action::{ActionError, ActionTree, Keys, Result};
-use base::{Bucket, Partition, Protocol};
-use job::{Job, MovePartition, ReloadDataset};
+use base::{Bucket, Bytes, Partition, Protocol};
+use job::{Job, MovePartition, RebalanceObjects, ReloadDataset};
 use path::DatasetPath;
 use state::State;
 use store::{FileStore, Store};
@@ -64,6 +64,25 @@ impl Runtime {
     }
 }
 
+fn execute_job(
+    runtime: &mut Runtime,
+    state: &State,
+    path: &DatasetPath,
+    job: &dyn Job,
+) -> Result<State> {
+    let state = runtime.execute(&state, job.actions(&state)?);
+
+    println!(
+        "{}",
+        ListPartitions::new(path.clone(), true).render(&state)?
+    );
+    println!("\npassed: {:#?}", runtime.passed);
+    println!("failed: {:#?}", runtime.failed);
+    println!("\n---\n");
+
+    Ok(state)
+}
+
 fn main() -> Result<()> {
     let store = FileStore::new(PathBuf::from("/tmp/osm-root"));
 
@@ -72,26 +91,22 @@ fn main() -> Result<()> {
 
     let mut runtime = Runtime::new(Box::new(store));
     let mut state = State::new();
-    println!("state-0: {}", state);
-
-    let updated_partition = path.partition_path(&Partition::new("date", "2021-01"));
 
     let reload = ReloadDataset::new(path.clone());
+
     let move_partition = MovePartition::new(
         path.partition_path(&Partition::new("date", "2020-01")),
-        updated_partition.clone(),
+        path.partition_path(&Partition::new("date", "2021-01")),
     );
 
-    state = runtime.execute(&state, reload.actions(&state)?);
-    println!("{}", ListPartitions::new(path.clone(), true).render(&state)?);
-    println!("\npassed: {:#?}", runtime.passed);
-    println!("failed: {:#?}", runtime.failed);
-    println!("\n---\n");
+    let rebalance = RebalanceObjects::new(
+        path.partition_path(&Partition::new("date", "2020-03")),
+        Bytes::new_in_mib(10),
+    );
 
-    state = runtime.execute(&state, move_partition.actions(&state)?);
-    println!("{}", ListPartitions::new(path.clone(), true).render(&state)?);
-    println!("\npassed: {:#?}", runtime.passed);
-    println!("failed: {:#?}", runtime.failed);
+    state = execute_job(&mut runtime, &state, &path, &reload)?;
+    state = execute_job(&mut runtime, &state, &path, &move_partition)?;
+    state = execute_job(&mut runtime, &state, &path, &rebalance)?;
 
     Ok(())
 }

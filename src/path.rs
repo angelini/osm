@@ -99,19 +99,19 @@ impl ObjectPath {
         &self.partition.partition
     }
 
-    pub fn update_partition(&self, partition: &Partition) -> ObjectPath {
-        ObjectPath {
-            partition: PartitionPath::new(self.partition.dataset.clone(), partition.clone()),
-            key: self.key.clone(),
-        }
-    }
-
     pub fn infer_format(&self) -> Option<Format> {
         match self.key.extension() {
             Some("csv") => Some(Format::Csv),
             Some("parquet") => Some(Format::Parquet),
             Some(_) => None,
             None => None,
+        }
+    }
+
+    pub fn update_partition(&self, partition: &Partition) -> Self {
+        Self {
+            partition: PartitionPath::new(self.partition.dataset.clone(), partition.clone()),
+            key: self.key.clone(),
         }
     }
 }
