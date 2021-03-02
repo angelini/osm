@@ -1,19 +1,24 @@
 use std::fmt;
 
+use anyhow::Result;
 use im::HashMap;
 use parquet::schema::types::Type as ParquetType;
+use thiserror::Error;
 
 use crate::base::{Bytes, Compression, ObjectKey, Partition};
 use crate::path::{DatasetPath, ObjectPath, PartitionPath};
 
-#[derive(Debug)]
+#[derive(Error, Debug)]
 pub enum StateError {
+    #[error("Missing dataset: {0}")]
     MissingDataset(DatasetPath),
+
+    #[error("Missing partition: {0}")]
     MissingPartition(Partition),
+
+    #[error("Missing object: {0}")]
     MissingObject(ObjectKey),
 }
-
-pub type Result<T> = std::result::Result<T, StateError>;
 
 #[derive(Debug, Clone)]
 pub struct CsvFormatState {
@@ -102,15 +107,17 @@ impl PartitionState {
     }
 
     fn get(&self, key: &ObjectKey) -> Result<&ObjectState> {
-        self.objects
+        Ok(self
+            .objects
             .get(key)
-            .ok_or_else(|| StateError::MissingObject(key.clone()))
+            .ok_or_else(|| StateError::MissingObject(key.clone()))?)
     }
 
     fn get_mut(&mut self, key: &ObjectKey) -> Result<&mut ObjectState> {
-        self.objects
+        Ok(self
+            .objects
             .get_mut(key)
-            .ok_or_else(|| StateError::MissingObject(key.clone()))
+            .ok_or_else(|| StateError::MissingObject(key.clone()))?)
     }
 
     pub fn size(&self) -> Bytes {
@@ -125,9 +132,10 @@ impl PartitionState {
     }
 
     fn remove_object(&mut self, key: &ObjectKey) -> Result<ObjectState> {
-        self.objects
+        Ok(self
+            .objects
             .remove(key)
-            .ok_or_else(|| StateError::MissingObject(key.clone()))
+            .ok_or_else(|| StateError::MissingObject(key.clone()))?)
     }
 }
 
@@ -142,15 +150,17 @@ impl DatasetState {
     }
 
     fn get(&self, partition: &Partition) -> Result<&PartitionState> {
-        self.partitions
+        Ok(self
+            .partitions
             .get(partition)
-            .ok_or_else(|| StateError::MissingPartition(partition.clone()))
+            .ok_or_else(|| StateError::MissingPartition(partition.clone()))?)
     }
 
     fn get_mut(&mut self, partition: &Partition) -> Result<&mut PartitionState> {
-        self.partitions
+        Ok(self
+            .partitions
             .get_mut(partition)
-            .ok_or_else(|| StateError::MissingPartition(partition.clone()))
+            .ok_or_else(|| StateError::MissingPartition(partition.clone()))?)
     }
 
     fn list_objects(&self, partition: &Partition) -> Result<Vec<ObjectKey>> {
@@ -164,9 +174,10 @@ impl DatasetState {
     }
 
     fn remove_partition(&mut self, partition: &Partition) -> Result<PartitionState> {
-        self.partitions
+        Ok(self
+            .partitions
             .remove(partition)
-            .ok_or_else(|| StateError::MissingPartition(partition.clone()))
+            .ok_or_else(|| StateError::MissingPartition(partition.clone()))?)
     }
 
     fn insert_partition(&mut self, partition: &Partition, state: PartitionState) {
@@ -187,22 +198,23 @@ impl State {
     }
 
     fn get(&self, path: &DatasetPath) -> Result<&DatasetState> {
-        self.datasets
+        Ok(self
+            .datasets
             .get(path)
-            .ok_or_else(|| StateError::MissingDataset(path.clone()))
+            .ok_or_else(|| StateError::MissingDataset(path.clone()))?)
     }
 
     fn get_mut(&mut self, path: &DatasetPath) -> Result<&mut DatasetState> {
-        self.datasets
+        Ok(self
+            .datasets
             .get_mut(path)
-            .ok_or_else(|| StateError::MissingDataset(path.clone()))
+            .ok_or_else(|| StateError::MissingDataset(path.clone()))?)
     }
 
     pub fn get_partition(&self, path: &PartitionPath) -> Result<&PartitionState> {
         self.get(&path.dataset)
             .and_then(|ds| ds.get(&path.partition))
     }
-
 
     pub fn get_object(&self, path: &ObjectPath) -> Result<&ObjectState> {
         self.get(&path.dataset_path())

@@ -9,7 +9,9 @@ mod view;
 
 use std::path::PathBuf;
 
-use action::{ActionError, ActionTree, Keys, Result};
+use anyhow::{Error, Result};
+
+use action::{ActionTree, Keys};
 use base::{Bucket, Bytes, Partition, Protocol};
 use job::{Job, MovePartition, RebalanceObjects, ReloadDataset};
 use path::DatasetPath;
@@ -20,7 +22,7 @@ use view::{ListPartitions, View};
 struct Runtime {
     store: Box<dyn Store>,
     passed: Vec<String>,
-    failed: Vec<(String, ActionError)>,
+    failed: Vec<(String, Error)>,
 }
 
 impl Runtime {
@@ -101,12 +103,17 @@ fn main() -> Result<()> {
 
     let rebalance = RebalanceObjects::new(
         path.partition_path(&Partition::new("date", "2020-03")),
-        Bytes::new_in_mib(10),
+        Bytes::new_in_mib(15),
     );
 
     state = execute_job(&mut runtime, &state, &path, &reload)?;
     state = execute_job(&mut runtime, &state, &path, &move_partition)?;
     state = execute_job(&mut runtime, &state, &path, &rebalance)?;
+
+    #[allow(clippy::never_loop)]
+    for (_, error) in runtime.failed {
+        return Err(error)
+    }
 
     Ok(())
 }

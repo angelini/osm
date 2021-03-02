@@ -1,30 +1,22 @@
 use std::collections::{HashMap, HashSet};
 use std::fmt;
 
+use anyhow::Result;
+use thiserror::Error;
+
 use crate::base::{ObjectKey, Partition};
 use crate::path::{DatasetPath, ObjectPath, PartitionPath};
 use crate::state::{DatasetState, ObjectState, PartitionState, State, StateError};
 use crate::store::{Store, StoreError};
 
-#[derive(Debug)]
+#[derive(Error, Debug)]
 pub enum ActionError {
-    State(StateError),
-    Store(StoreError),
-}
+    #[error(transparent)]
+    State(#[from] StateError),
 
-impl From<StateError> for ActionError {
-    fn from(error: StateError) -> Self {
-        Self::State(error)
-    }
+    #[error(transparent)]
+    Store(#[from] StoreError),
 }
-
-impl From<StoreError> for ActionError {
-    fn from(error: StoreError) -> Self {
-        Self::Store(error)
-    }
-}
-
-pub type Result<T> = std::result::Result<T, ActionError>;
 
 pub trait Action: fmt::Debug {
     fn key(&self) -> String;
@@ -216,6 +208,7 @@ impl Action for RebalanceAction {
         let object_states = store.rebalance_objects(self.paths.as_slice(), &output_paths, rows_per_file)?;
 
         let mut new_state = state.clone();
+
         for (path, object_state) in output_paths.iter().zip(object_states) {
             new_state = new_state.insert_object(path, object_state)?;
         }

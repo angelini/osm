@@ -5,6 +5,8 @@ authors = ["Alex Angelini <alex.louis.angelini@gmail.com>"]
 edition = "2018"
 
 [dependencies]
+anyhow = "1.0"
 arrow = "3.0.0"
 im = "15.0.0"
 parquet = "3.0.0"
+thiserror = "1.0"

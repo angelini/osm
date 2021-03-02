@@ -1,8 +1,10 @@
+use anyhow::Result;
+
 use crate::path::{DatasetPath, PartitionPath};
-use crate::state::{Result as StateResult, State};
+use crate::state::State;
 
 pub trait View {
-    fn render(&self, state: &State) -> StateResult<String>;
+    fn render(&self, state: &State) -> Result<String>;
 }
 
 pub struct ListPartitions {
@@ -17,7 +19,7 @@ impl ListPartitions {
 }
 
 impl View for ListPartitions {
-    fn render(&self, state: &State) -> StateResult<String> {
+    fn render(&self, state: &State) -> Result<String> {
         let mut out = format!("List Partitions for \"{}\":", self.path);
 
         for partition in state.list_partitions(&self.path)? {
@@ -55,7 +57,7 @@ impl ListObjects {
 }
 
 impl View for ListObjects {
-    fn render(&self, state: &State) -> StateResult<String> {
+    fn render(&self, state: &State) -> Result<String> {
         let mut out = format!("List Objects for \"{}\":", self.path);
 
         for object_path in &state.list_objects(&self.path)? {
