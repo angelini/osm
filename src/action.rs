@@ -4,10 +4,10 @@ use std::fmt;
 use anyhow::Result;
 use thiserror::Error;
 
-use crate::base::{ObjectKey, Partition};
+use crate::base::{Bytes, Format, ObjectKey, Partition};
 use crate::path::{DatasetPath, ObjectPath, PartitionPath};
 use crate::state::{DatasetState, ObjectState, PartitionState, State, StateError};
-use crate::store::{Store, StoreError};
+use crate::store::{RebalanceTarget, Store, StoreError};
 
 #[derive(Error, Debug)]
 pub enum ActionError {
@@ -170,12 +170,17 @@ impl Action for MoveAction {
 #[derive(Debug)]
 pub struct RebalanceAction {
     paths: Vec<ObjectPath>,
+    size: Bytes,
     count: usize,
 }
 
 impl RebalanceAction {
-    pub fn new(paths: Vec<ObjectPath>, count: usize) -> Self {
-        Self { paths, count }
+    pub fn new(paths: Vec<ObjectPath>, size: Bytes, count: usize) -> Self {
+        Self { paths, size, count }
+    }
+
+    fn format(&self) -> Option<Format> {
+        self.paths[0].infer_format()
     }
 }
 
@@ -190,22 +195,34 @@ impl Action for RebalanceAction {
     }
 
     fn execute(&self, store: &dyn Store, state: &State) -> Result<State> {
-        let total_rows: usize = self
+        let total_rows = self
             .paths
             .iter()
-            .map(|path| state.get_object(path).map_or(0, |object| object.rows))
-            .sum();
-        let rows_per_file = total_rows / self.count;
+            .map(|path| state.get_object(path).map_or(None, |object| object.num_rows()))
+            .fold(Some(0), |acc, num| {
+                match (acc, num) {
+                    (Some(acc), Some(num)) => Some(acc + num),
+                    (_, _) => None,
+                }
+            });
+
+        let target = match total_rows {
+            Some(rows) => RebalanceTarget::Rows(rows / self.count),
+            None => RebalanceTarget::Size(self.size),
+        };
+
+        // FIXME: Validate format
+        let format = self.format().unwrap();
 
         let output_paths = (0..self.count)
             .map(|idx| {
                 self.paths[0]
                     .partition_path()
-                    .object_path(&ObjectKey::new(format!("{}.parquet", idx)))
+                    .object_path(&ObjectKey::new(format!("{}.{}", idx, format)))
             })
             .collect::<Vec<ObjectPath>>();
 
-        let object_states = store.rebalance_objects(self.paths.as_slice(), &output_paths, rows_per_file)?;
+        let object_states = store.rebalance_objects(self.paths.as_slice(), &output_paths, &target)?;
 
         let mut new_state = state.clone();
 

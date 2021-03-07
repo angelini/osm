@@ -9,11 +9,13 @@ pub enum Format {
     Parquet,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub enum Compression {
-    None,
-    Gzip,
-    Snappy,
+impl fmt::Display for Format {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Self::Csv => write!(f, "csv"),
+            Self::Parquet => write!(f, "parquet"),
+        }
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
@@ -150,7 +152,7 @@ impl Bytes {
         Self(size * Self::MIB)
     }
 
-    pub fn grow(&self, multiplier: f64) -> Self {
+    pub fn mul(&self, multiplier: f64) -> Self {
         Self((self.0 as f64 * multiplier) as usize)
     }
 

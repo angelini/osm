@@ -35,8 +35,8 @@ impl View for ListPartitions {
                     let object = state.get_object(object_path)?;
 
                     out.push_str(&format!(
-                        "\n    - {} (rows: {}, size: {}, format: {})",
-                        object_path.key, object.rows, object.size, object.format
+                        "\n    - {} (size: {}, format: {})",
+                        object_path.key, object.size, object.format
                     ))
                 }
             }
@@ -64,8 +64,8 @@ impl View for ListObjects {
             let object = state.get_object(object_path)?;
 
             out.push_str(&format!(
-                "\n  - {} (rows: {}, size: {}, format: {})",
-                object_path.key, object.rows, object.size, object.format
+                "\n  - {} (size: {}, format: {})",
+                object_path.key, object.size, object.format
             ))
         }
 

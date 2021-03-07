@@ -1,11 +1,12 @@
 use std::fmt;
 
 use anyhow::Result;
+use arrow::datatypes::Schema;
 use im::HashMap;
 use parquet::schema::types::Type as ParquetType;
 use thiserror::Error;
 
-use crate::base::{Bytes, Compression, ObjectKey, Partition};
+use crate::base::{Bytes, ObjectKey, Partition};
 use crate::path::{DatasetPath, ObjectPath, PartitionPath};
 
 #[derive(Error, Debug)]
@@ -22,27 +23,25 @@ pub enum StateError {
 
 #[derive(Debug, Clone)]
 pub struct CsvFormatState {
-    compression: Compression,
+    schema: Schema,
     delimiter: String,
 }
 
 impl CsvFormatState {
-    fn default() -> Self {
-        CsvFormatState {
-            compression: Compression::None,
-            delimiter: ",".to_string(),
-        }
+    pub fn new(schema: Schema, delimiter: String) -> Self {
+        CsvFormatState { schema, delimiter }
     }
 }
 
 #[derive(Debug, Clone)]
 pub struct ParquetFormatState {
     schema: ParquetType,
+    num_rows: usize,
 }
 
 impl ParquetFormatState {
-    fn new(schema: ParquetType) -> Self {
-        Self { schema }
+    pub fn new(schema: ParquetType, num_rows: usize) -> Self {
+        Self { schema, num_rows }
     }
 }
 
@@ -52,11 +51,20 @@ pub enum FormatState {
     Parquet(ParquetFormatState),
 }
 
+impl FormatState {
+    fn num_rows(&self) -> Option<usize> {
+        match self {
+            FormatState::Parquet(state) => Some(state.num_rows),
+            _ => None,
+        }
+    }
+}
+
 impl fmt::Display for FormatState {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            FormatState::Csv(_) => write!(f, "Csv"),
-            FormatState::Parquet(_) => write!(f, "Parquet"),
+            FormatState::Csv(state) => write!(f, "Csv(delimiter: {})", state.delimiter),
+            FormatState::Parquet(state) => write!(f, "Parquet(num_rows: {})", state.num_rows),
         }
     }
 }
@@ -64,35 +72,32 @@ impl fmt::Display for FormatState {
 #[derive(Debug, Clone)]
 pub struct ObjectState {
     pub format: FormatState,
-    pub rows: usize,
     pub size: Bytes,
 }
 
 impl ObjectState {
-    pub fn new_csv(rows: usize, size: Bytes) -> Self {
-        ObjectState {
-            format: FormatState::Csv(CsvFormatState::default()),
-            rows,
+    pub fn new_csv(format: CsvFormatState, size: Bytes) -> Self {
+        Self {
+            format: FormatState::Csv(format),
             size,
         }
     }
 
-    pub fn new_parquet(rows: usize, size: Bytes, type_: ParquetType) -> Self {
-        ObjectState {
-            format: FormatState::Parquet(ParquetFormatState::new(type_)),
-            rows,
+    pub fn new_parquet(format: ParquetFormatState, size: Bytes) -> Self {
+        Self {
+            format: FormatState::Parquet(format),
             size,
         }
+    }
+
+    pub fn num_rows(&self) -> Option<usize> {
+        self.format.num_rows()
     }
 }
 
 impl fmt::Display for ObjectState {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(
-            f,
-            "Object(rows: {}, size: {}, format: {})",
-            self.rows, self.size, self.format
-        )
+        write!(f, "Object(size: {}, format: {})", self.size, self.format)
     }
 }
 

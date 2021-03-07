@@ -30,6 +30,10 @@ build-example: $(PARQUET_FILES)
 		mkdir -p $(DATA_EXAMPLE)/nyc_taxis/date=$$part; \
 		cp $(DATA_PARQUET)/yellow_tripdata_$$part.parquet $(DATA_EXAMPLE)/nyc_taxis/date=$$part/001.parquet; \
 	done
+	for part in 2020-01 2020-02 2020-03 ; do \
+		mkdir -p $(DATA_EXAMPLE)/nyc_taxis_csv/date=$$part; \
+		cp $(DATA_CSV)/yellow_tripdata_$$part.csv $(DATA_EXAMPLE)/nyc_taxis_csv/date=$$part/001.csv; \
+	done
 
 setup-example:
 	rm -rf $(TMP_DIR)

@@ -7,9 +7,16 @@ use parquet::errors::ParquetError;
 use thiserror::Error;
 
 use crate::base::{Bytes, Format, ObjectKey, Partition, ToStdPath};
-use crate::parquet::{combine_objects, read_object_state};
+use crate::csv::Csv;
+use crate::parquet::Parquet;
 use crate::path::{DatasetPath, ObjectPath, PartitionPath};
 use crate::state::ObjectState;
+
+#[derive(Debug, Clone)]
+pub enum RebalanceTarget {
+    Rows(usize),
+    Size(Bytes),
+}
 
 #[derive(Error, Debug)]
 pub enum StoreError {
@@ -21,6 +28,9 @@ pub enum StoreError {
 
     #[error("Cannot infer schema from path: {0}")]
     CannotInferSchema(ObjectPath),
+
+    #[error("Cannot combine format: {0:?} and target: {1:?}")]
+    CannotCombineFormatAndTarget(Format, RebalanceTarget),
 
     #[error("Invalid partition name: {0}")]
     InvalidPartition(String),
@@ -41,7 +51,7 @@ pub trait Store {
         &self,
         input_paths: &[ObjectPath],
         output_paths: &[ObjectPath],
-        rows_per_file: usize,
+        target: &RebalanceTarget,
     ) -> Result<Vec<ObjectState>>;
 }
 
@@ -59,20 +69,21 @@ impl FileStore {
         buf.push(path);
         buf
     }
+
+    fn read_object_state(path: &ObjectPath, file: fs::File) -> Result<ObjectState> {
+        match path.infer_format() {
+            Some(Format::Csv) => Csv::read_object_state(file),
+            Some(Format::Parquet) => Parquet::read_object_state(&file),
+            None => as_err(StoreError::CannotInferSchema(path.clone())),
+        }
+    }
 }
 
 impl Store for FileStore {
     fn read_object(&self, path: &ObjectPath) -> Result<ObjectState> {
         let fs_path = self.fs_path(path.std_path());
         let file = fs::File::open(fs_path)?;
-
-        let state = match path.infer_format() {
-            Some(Format::Csv) => ObjectState::new_csv(0, Bytes::new(0)),
-            Some(Format::Parquet) => read_object_state(&file)?,
-            None => return as_err(StoreError::CannotInferSchema(path.clone())),
-        };
-
-        Ok(state)
+        Self::read_object_state(path, file)
     }
 
     fn move_object(&self, source: &ObjectPath, target: &ObjectPath) -> Result<()> {
@@ -156,7 +167,7 @@ impl Store for FileStore {
         &self,
         input_paths: &[ObjectPath],
         output_paths: &[ObjectPath],
-        rows_per_file: usize,
+        target: &RebalanceTarget,
     ) -> Result<Vec<ObjectState>> {
         let input_files = input_paths
             .iter()
@@ -177,14 +188,26 @@ impl Store for FileStore {
             })
             .collect::<Result<Vec<fs::File>>>()?;
 
-        combine_objects(input_files, output_files, rows_per_file)?;
+        match (input_paths[0].infer_format(), target.clone()) {
+            (Some(Format::Csv), RebalanceTarget::Size(size)) => {
+                let paths: Vec<PathBuf> = output_paths.iter().map(|path| self.fs_path(path.std_path())).collect();
+                Csv::combine_objects(input_files, output_files, Box::new(move |idx| {
+                    Bytes::new(fs::metadata(&paths[idx]).unwrap().len() as usize) >= size.mul(0.9)
+                }))
+            }
+            (Some(Format::Parquet), RebalanceTarget::Rows(rows)) => {
+                Parquet::combine_objects(input_files, output_files, rows)
+            }
+            (Some(format), _) => as_err(StoreError::CannotCombineFormatAndTarget(format.clone(), target.clone())),
+            (None, _) => as_err(StoreError::CannotInferSchema(input_paths[0].clone())),
+        }?;
 
         let states = output_paths
             .iter()
             .map(|path| {
                 let file = fs::File::open(self.fs_path(path.std_path()))
                     .with_context(|| format!("rebalanced object not found: {}", path))?;
-                Ok(read_object_state(&file)?)
+                Self::read_object_state(path, file)
             })
             .collect::<Result<Vec<ObjectState>>>()?;
 

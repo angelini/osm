@@ -1,7 +1,8 @@
 use anyhow::Result;
 
 use crate::action::{
-    ActionTree, MoveAction, RebalanceAction, ReloadDatasetAction, RemoveObjectAction, RemovePartitionAction,
+    ActionTree, MoveAction, RebalanceAction, ReloadDatasetAction, RemoveObjectAction,
+    RemovePartitionAction,
 };
 use crate::base::Bytes;
 use crate::path::{DatasetPath, PartitionPath};
@@ -88,19 +89,29 @@ impl Job for RebalanceObjects {
         let mut actions = ActionTree::new();
         let partition_size = state.get_partition(&self.path)?.size();
 
-        if partition_size < self.target_size.grow(1.5) {
-            return Ok(actions)
+        if partition_size < self.target_size.mul(1.5) {
+            return Ok(actions);
         }
 
         let objects = state.list_objects(&self.path)?;
-        let target_count = partition_size.div(self.target_size);
+        let count = partition_size.div(self.target_size);
 
         let rebalance_node = actions.add_node(&[]);
-        actions.add_action(rebalance_node, Box::new(RebalanceAction::new(objects.clone(), target_count)));
+        actions.add_action(
+            rebalance_node,
+            Box::new(RebalanceAction::new(
+                objects.clone(),
+                self.target_size,
+                count,
+            )),
+        );
 
         let delete_node = actions.add_node(&[rebalance_node]);
         for object in &objects {
-            actions.add_action(delete_node, Box::new(RemoveObjectAction::new(object.clone())))
+            actions.add_action(
+                delete_node,
+                Box::new(RemoveObjectAction::new(object.clone())),
+            )
         }
 
         Ok(actions)
